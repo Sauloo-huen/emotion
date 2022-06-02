@@ -1,0 +1,97 @@
+import argparse
+from urllib import request
+import time, random
+from bs4 import BeautifulSoup
+
+Url_Headers = {
+    'Host': 'qc.wa.news.cn',
+    'Proxy-Connection': 'keep-alive',
+    'Cache-Control': 'max-age=0',
+    'Upgrade-Insecure-Requests': '1',
+    'User-Agent': 'Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.36',
+    'Accept': '*/*',
+    'Accept-Language': 'zh-CN,zh;q=0.8,en;q=0.6'
+}
+
+Article_Headers = {
+    'Host': 'kr.xinhuanet.com',
+    'Proxy-Connection': 'keep-alive',
+    'Cache-Control': 'max-age=0',
+    'Upgrade-Insecure-Requests': '1',
+    'User-Agent': 'Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/59.0.3071.115 Safari/537.36',
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8',
+    'Accept-Language': 'zh-CN,zh;q=0.8,en;q=0.6'
+}
+
+
+def GetHTML(url, Headers):
+    proxy = request.ProxyHandler({'http': '109.105.1.52:8080'})  # 构建代理IP
+    opener = request.build_opener(proxy)  # 使用这些代理proxy对象，创建自定义opener对象
+    request.install_opener(opener)  # 将opener应用到全局，之后所有的，不管是opener.open()还是urlopen() 发送请求，都将使用自定义代理。
+    req = request.Request(url, headers=Headers)
+    page = request.urlopen(req, timeout=20)
+    html = page.read() # 得到网页内容，是一个数组
+    time.sleep(1 * random.random() + 0.5)
+    return html
+
+
+def GetUrlPages(url):
+    html = GetHTML(url, Url_Headers)  # 得到网站内容
+    return html
+
+def GetArticleUrl():
+    Url = []
+    # for item in soup.find_all('li', class_="item clearfix"): # 找子网页
+    #     text = item.attrs['href']
+    #     text = text.replace("..", "http://www.dian3x.com/story")
+    #     Url.append(text)
+    for i in range(1,10): # https://www.boohee.com/food/group/i?page=j
+        for j in range(1,10):
+            Url.append(f"https://www.boohee.com/food/group/{i}?page={j}")
+    return Url
+
+def GetArticlePages(html, idx, name):
+    f_zh = open(name, 'w', encoding='utf-8')
+    soup = BeautifulSoup(html, "html.parser")
+
+    for item in soup.find_all('a', target_='_blank'):
+        text = item.attrs['title']
+        print(text)
+        # f_zh.write(text + '\n')
+    # f_zh.close()
+    return 0
+
+def concat(name, language, idx):
+    path = 'src/{}.{}'.format(name, language)
+    f_write = open(path, 'w', encoding='utf-8')
+    for i in range(idx):
+        read_path = 'src/{}{}.{}'.format(name, i, language)
+        f_read = open(read_path, 'r', encoding='utf-8')
+        for line in f_read.readlines():
+            f_write.write(line)
+        f_read.close()
+
+    f_write.close()
+
+
+def main(url, name):
+    # from html get some urls about books
+    Url = GetArticleUrl()
+    count = 0
+    for idx, url in enumerate(Url):
+        count += 1
+        print(idx)
+        print(url)
+        html = GetUrlPages(url)
+        GetArticlePages(html, idx, name=name)
+    return count
+
+
+if __name__ == '__main__':
+    parse = argparse.ArgumentParser()
+    parse.add_argument('-url', default='https://www.boohee.com/food/group/1?page=1', help='爬取网站')
+    parse.add_argument('-name', default='menu_zh', help='书名')
+    args = parse.parse_args()
+    count = main(args.url, args.name)
+    concat(name=args.name, language='en', idx=count)
+    concat(name=args.name, language='zh', idx=count)
