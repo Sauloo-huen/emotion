@@ -53,3 +53,49 @@ class PromptBERT(nn.Module):
         # predicted_token_id = logits[0, mask_token_index].argmax(axis=-1)
         # x = self.tokenizer.decode(predicted_token_id)
         return outputs
+
+class get_emb():
+    def __init__(self):
+        super(get_emb, self).__init__()
+        self.device = 'cuda'
+        self.model = BertForSequenceClassification.from_pretrained(r'D:\Python_projection\Bert-Chinese-Prompt-Mask-main\bert-base-chinese',
+                                                       num_labels=8)
+        print(self.model)
+        self.emb = self.model.bert.embeddings.to(self.device)
+        print(self.emb)
+        self.pre_seq_len = 4
+        self.prefix_tokens = torch.arange(self.pre_seq_len).long().to(self.device)  # 连续自动prompt都这样写
+        self.prefix_encoder = torch.nn.Embedding(self.pre_seq_len, 768).to(self.device)  # 除了embedding 也可以加其他层
+        for param in self.model.parameters():
+            param.requires_grad = False
+
+
+    def get_prompt(self, batch_size):
+        prefix_tokens = self.prefix_tokens.unsqueeze(0).expand(batch_size, -1).to(self.device) # 加一维batch size
+        prompts = self.prefix_encoder(prefix_tokens) # 经过embedding层，多一维hidden size
+        return prompts # (batch_size, seq_len, hidden_size)
+
+    def forward(self, input_ids, attention_mask):
+        batch_size = input_ids.shape[0]
+        print(batch_size)
+        raw_emb = self.emb(
+            input_ids=input_ids
+        )
+        prompts = self.get_prompt(batch_size=batch_size)
+        inputs_embeds = torch.cat((prompts, raw_emb), dim=1)  # 两个不同的embedding拼在一起
+        prefix_attention_mask = torch.ones(batch_size, self.pre_seq_len).to(self.device)  # 全一矩阵表示prompt的mask，prompt里没有padding
+        attention_mask = torch.cat((prefix_attention_mask, attention_mask), dim=1) # [4,64]
+
+        return inputs_embeds, attention_mask
+
+class PromptBERT_new(nn.Module):
+    def __init__(self):
+        super(PromptBERT_new, self).__init__()
+        self.roberta = BertForSequenceClassification.from_pretrained(r'D:\Python_projection\Bert-Chinese-Prompt-Mask-main\bert-base-chinese',
+                                                       num_labels=8)
+        # self.tokenizer = BertTokenizer.from_pretrained('bert-base-chinese')
+
+    def forward(self, input_emb, attention_mask, label):
+        outputs = self.roberta(inputs_embeds=input_emb, attention_mask=attention_mask, labels=label)
+
+        return outputs
