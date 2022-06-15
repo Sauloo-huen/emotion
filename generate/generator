@@ -1,0 +1,218 @@
+import argparse
+import sys
+import types
+from tqdm import tqdm
+import torch
+
+from transformers import AutoTokenizer, AutoModelForCausalLM
+
+
+parser=argparse.ArgumentParser(description='Controlled Generation using Prompt Learning (Trained Model)')
+parser.add_argument('--model', type=str, required=True, help='Model: attr-algn | control-prefixes | prefix-tuning')
+parser.add_argument('--path', type=str, required=True, help='Path of Tained Model')
+parser.add_argument('--device', type=str, default='gpu', help='Device where Model Trained on: gpu(default) | cpu')
+# parser.add_argument('--code', type=str, required=True, help='Control Codes: | economy | sports | ..')
+# parser.add_argument('--prompt', type=str, default='', help='Prompt Text: Last night US..')
+parser.add_argument('--n_sample', type=int, default=3, help='Number of Sampled Generations: 5(default)')
+parser.add_argument('--max_len', type=int, default=100, help='Max Length of Generated Texts: 100(default)')
+parser.add_argument('--p', type=float, default=0.8, help='P of Nucleus(Top-p) Sampling')
+parser.add_argument('--method', type=str, default='A', help='Method of Attribute-Alignment: A(default) | AC')
+parser.add_argument('--domain', type=str, default='domain', help='Corpus Domain for Attribute-Alignment (AC)')
+parser.add_argument('--k', type=float, default=40, help='top_k generate')
+parser.add_argument('--name', type=str, default='data_product', required=False, help='')
+parser.add_argument('--batch_size', type=int, default='64', required=False, help='')
+#parser.add_argument('', type=, default=, help=)
+args=parser.parse_args()
+
+def get_prefix(tokenizer, pretrained, model, device):
+    """
+    """
+
+    if args.model=='control-prefixes':
+        # control=[args.code.split('|')[1:]]
+        control = [args.code.split('|')[1:]]*args.batch_size
+        prefix=model(batch_size=args.batch_size, control=control, device=device)
+
+
+    return prefix # past key value
+
+def load_model(device):
+    """
+    """
+    # Load Trained Model
+    model=torch.load(args.path).to(device)
+    # Config of Base LM
+    base_config=model.base_config
+    print('Base LM:', base_config._name_or_path, '\n')
+    
+    # Load Base (Pre-Trained) Tokenizer, LM
+    tokenizer=AutoTokenizer.from_pretrained(base_config._name_or_path)
+    pretrained=AutoModelForCausalLM.from_pretrained(base_config._name_or_path).to(device)
+    
+    tokenizer.pad_token = tokenizer.eos_token
+
+    if tokenizer.pad_token==None:
+        # Add PAD Token: [PAD]
+        tokenizer.add_special_tokens({'pad_token': '[PAD]'})
+        pretrained.resize_token_embeddings(len(tokenizer))
+
+    # Bind Customized Generation Function To Base LM
+    sys.path.append('./transformers/')
+    from customized_generation_utils import generate, sample
+    
+    pretrained.generate=types.MethodType(generate, pretrained)
+    pretrained.sample=types.MethodType(sample, pretrained)
+
+    return tokenizer, pretrained, model
+
+
+def set_seed(seed):
+  torch.manual_seed(seed)
+  if torch.cuda.is_available():
+    torch.cuda.manual_seed_all(seed)
+
+
+def do_generate(device):
+    """
+    Generation Strategy: Nucleus Sampling
+    """
+    print('\n***** Controlled Generation *****')
+    print('Model:', args.model)
+    print('Path:', args.path)
+    # print('Control Codes:', args.code)
+    # print('Prompt:', args.prompt)
+    print('Device:', device)
+    print('***********************************\n')
+
+    # Load Base LM & Trained Model
+    tokenizer, pretrained, model=load_model(device=device)
+    r = open('dataset/menu_title2.txt','r',encoding='utf-8')
+    file_name = f'{args.model}_{args.n_sample}_{args.p}_{args.name}'
+    with open(f'./generate_file/menu_new', 'w', encoding='utf-8') as f:
+        lines = r.readlines()
+        for line in tqdm(lines,total=len(lines)):
+            line = line.strip('\n')
+            line = line.split('\t')
+            args.code = '|menu'
+            args.prompt = line[0]
+            # args.prompt = '#toy#'
+
+            # Get Past_Key_Values to decrease calculation
+            prefix=get_prefix(tokenizer=tokenizer, pretrained=pretrained, model=model, device=device)
+
+            # Input Text
+            # print('set input')
+
+            # Control-Codes <BOS> Prompt
+            input_ = args.code+'\t'+args.prompt+' @@'+tokenizer.bos_token
+            input_ = [input_] * args.batch_size  # list
+            # print(input_.shape)
+            input_ = tokenizer.batch_encode_plus(input_, return_tensors='pt').to(device) # tensor([[   91,  1660,   220, 50256]], device='cuda:0')
+
+            # print('generateing...')
+
+            # Repeat Sampling for 'n_sample' Times
+            for n in range(args.n_sample):
+                # Nucleus Sampling
+                outputs=pretrained.generate(
+                    input_ids=input_['input_ids'],
+                    encoder_attention_mask=input_['attention_mask'],
+                    do_sample=True,
+                    max_length=args.max_len,
+                    top_p=args.p,
+                    top_k=args.k,
+                    prefix=prefix,
+                    pad_token_id=tokenizer.eos_token_id
+                )
+                # Decode
+                # generated=tokenizer.decode(outputs[0], skip_special_tokens=True) # single generate
+                generated = [tokenizer.decode(out, skip_special_tokens=True, clean_up_tokenization_spaces=True) for out in
+                             outputs]
+                for line in generated:
+                    line = line.replace('\n', '')
+                    f.write(line+'\n')
+                    # print(line)
+                # print(generated)
+                # generated = generated.replace('\n', '')
+                # f.write(generated+'\n')
+                # print("-----")
+        f.close()
+
+def do_generate1(device):
+    """
+    Generation Strategy: Nucleus Sampling
+    """
+    print('\n***** Controlled Generation *****')
+    print('Model:', args.model)
+    print('Path:', args.path)
+    # print('Control Codes:', args.code)
+    # print('Prompt:', args.prompt)
+    print('Device:', device)
+    print('***********************************\n')
+
+    # Load Base LM & Trained Model
+    tokenizer, pretrained, model=load_model(device=device)
+    r = open('dataset/toy_wash.txt','r',encoding='utf-8')
+    file_name = f'{args.model}_{args.n_sample}_{args.p}_{args.name}'
+    with open(f'./generate_file/{file_name}', 'w', encoding='utf-8') as f:
+
+        args.code = '|toy'
+        # args.prompt = line[0]
+        args.prompt = '#TOY#'
+
+        # Get Past_Key_Values to decrease calculation
+        prefix=get_prefix(tokenizer=tokenizer, pretrained=pretrained, model=model, device=device)
+
+        # Input Text
+        print('set input')
+        # Control-Codes <BOS> Prompt
+        input_ = args.code+'\t'+args.prompt+' @@'+tokenizer.bos_token
+        input_ = [input_] * args.batch_size  # list
+        # print(input_.shape)
+        input_ = tokenizer.batch_encode_plus(input_, return_tensors='pt').to(device) # tensor([[   91,  1660,   220, 50256]], device='cuda:0')
+
+        print('generateing...')
+
+        # Repeat Sampling for 'n_sample' Times
+        for n in range(args.n_sample):
+            # Nucleus Sampling
+            outputs=pretrained.generate(
+                input_ids=input_['input_ids'],
+                encoder_attention_mask=input_['attention_mask'],
+                do_sample=True,
+                max_length=args.max_len,
+                top_p=args.p,
+                top_k=args.k,
+                prefix=prefix,
+                pad_token_id=tokenizer.eos_token_id
+            )
+            # Decode
+            # generated=tokenizer.decode(outputs[0], skip_special_tokens=True) # single generate
+            generated = [tokenizer.decode(out, skip_special_tokens=True, clean_up_tokenization_spaces=True) for out in
+                         outputs]
+            for line in generated:
+                line = line.replace('\n', '')
+                f.write(line+'\n')
+                print(line)
+            # print(generated)
+            # generated = generated.replace('\n', '')
+            # f.write(generated+'\n')
+            print("-----")
+    f.close()
+
+def main():
+    set_seed(0)
+    if args.model not in ['prefix-tuning', 'control-prefixes', 'attr-algn']:
+        print('Wrong Model Name!')
+        return
+
+    if args.device=='gpu' and torch.cuda.is_available():
+        device=torch.device('cuda:0')
+    else:
+        device=torch.device('cpu')
+
+    do_generate(device=device)
+    # do_generate1(device=device)
+
+if __name__=='__main__':
+    main()
