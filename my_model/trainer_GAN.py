@@ -21,7 +21,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def train():
+def train(): # 八分类
     emb = get_emb()
     config = Config()
     model = PromptBERT_new()
@@ -132,7 +132,7 @@ def train():
             break
         test(config, emb, model, test_iter)
 
-def train2():
+def train2(): # 二分类
     # emb = get_emb()
     config = Config()
     # model = PromptBERT_new()
